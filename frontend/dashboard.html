@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<!--
+  FILE: frontend/dashboard.html
+  WHAT: Manager dashboard — shows live lead stats and agent performance
+  OPEN: Just open this file in a browser
+        OR deploy to Netlify (free) for team access
+  EDIT: Change API_URL below to your actual server URL
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Divine Hindu — Lead Dashboard</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+           background: #f5f5f5; color: #333; font-size: 14px; }
+    header { background: #1a1a2e; color: white; padding: 16px 24px;
+             display: flex; justify-content: space-between; align-items: center; }
+    header h1 { font-size: 18px; font-weight: 500; }
+    #last-updated { font-size: 12px; opacity: 0.7; }
+    .container { max-width: 1100px; margin: 0 auto; padding: 20px; }
+    .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+               gap: 12px; margin-bottom: 20px; }
+    .metric-card { background: white; border-radius: 8px; padding: 16px;
+                   box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    .metric-card .label { font-size: 11px; color: #888; text-transform: uppercase;
+                          letter-spacing: 0.5px; margin-bottom: 6px; }
+    .metric-card .value { font-size: 28px; font-weight: 600; }
+    .metric-card .sub { font-size: 11px; color: #aaa; margin-top: 4px; }
+    .metric-card.green .value { color: #22c55e; }
+    .metric-card.amber .value { color: #f59e0b; }
+    .metric-card.red   .value { color: #ef4444; }
+    .metric-card.blue  .value { color: #3b82f6; }
+    section { background: white; border-radius: 8px; padding: 20px;
+              box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin-bottom: 20px; }
+    section h2 { font-size: 15px; font-weight: 600; margin-bottom: 14px; color: #111; }
+    table { width: 100%; border-collapse: collapse; }
+    th { text-align: left; font-size: 11px; font-weight: 600; color: #888;
+         text-transform: uppercase; letter-spacing: 0.4px;
+         padding: 6px 10px; border-bottom: 2px solid #f0f0f0; }
+    td { padding: 10px; border-bottom: 1px solid #f5f5f5; }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: #fafafa; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 12px;
+             font-size: 11px; font-weight: 500; }
+    .badge.assigned  { background: #dbeafe; color: #1d4ed8; }
+    .badge.contacted { background: #fef3c7; color: #92400e; }
+    .badge.converted { background: #dcfce7; color: #166534; }
+    .badge.lost      { background: #fee2e2; color: #991b1b; }
+    .badge.callback  { background: #ede9fe; color: #5b21b6; }
+    .badge.active    { background: #dcfce7; color: #166534; }
+    .badge.on-leave  { background: #f3f4f6; color: #6b7280; }
+    .badge.breach    { background: #fee2e2; color: #991b1b; font-size: 10px; }
+    .filters { display: flex; gap: 10px; margin-bottom: 16px; align-items: center; }
+    select, button { padding: 6px 12px; border: 1px solid #ddd; border-radius: 6px;
+                     font-size: 13px; background: white; cursor: pointer; }
+    button.primary { background: #1a1a2e; color: white; border: none; }
+    button.primary:hover { background: #2d2d5e; }
+    #loading { text-align: center; padding: 40px; color: #888; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>🙏 Divine Hindu — Lead Dashboard</h1>
+  <span id="last-updated">Loading...</span>
+</header>
+
+<div class="container">
+
+  <div class="filters">
+    <label style="font-size:13px;color:#666">Period:</label>
+    <select id="days-filter" onchange="loadDashboard()">
+      <option value="1">Today</option>
+      <option value="7" selected>Last 7 days</option>
+      <option value="30">Last 30 days</option>
+    </select>
+    <button class="primary" onclick="loadDashboard()">↻ Refresh</button>
+  </div>
+
+  <div id="loading">Loading dashboard...</div>
+
+  <!-- Metric cards -->
+  <div class="metrics" id="metrics" style="display:none"></div>
+
+  <!-- Agent performance -->
+  <section id="agent-section" style="display:none">
+    <h2>Agent Performance</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Agent</th>
+          <th>Status</th>
+          <th>Assigned</th>
+          <th>Contacted</th>
+          <th>Converted</th>
+          <th>Pending</th>
+          <th>Conversion %</th>
+          <th>Avg response</th>
+        </tr>
+      </thead>
+      <tbody id="agent-table"></tbody>
+    </table>
+  </section>
+
+  <!-- Recent leads -->
+  <section id="leads-section" style="display:none">
+    <h2>Recent Leads</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Phone</th>
+          <th>Assigned To</th>
+          <th>Status</th>
+          <th>Escalated</th>
+          <th>Received</th>
+          <th>Notes</th>
+        </tr>
+      </thead>
+      <tbody id="leads-table"></tbody>
+    </table>
+  </section>
+
+</div>
+
+<script>
+  // ── CHANGE THIS to your actual server URL ──
+  const API_URL = 'http://localhost:3000';
+  // e.g. 'https://divine-hindu-crm.railway.app'
+
+  async function loadDashboard() {
+    const days = document.getElementById('days-filter').value;
+    document.getElementById('loading').style.display = 'block';
+    document.getElementById('metrics').style.display = 'none';
+    document.getElementById('agent-section').style.display = 'none';
+    document.getElementById('leads-section').style.display = 'none';
+
+    try {
+      const res = await fetch(`${API_URL}/dashboard?days=${days}`);
+      const data = await res.json();
+
+      renderMetrics(data.totals);
+      renderAgents(data.byAgent);
+      renderLeads(data.recentLeads);
+
+      document.getElementById('loading').style.display = 'none';
+      document.getElementById('metrics').style.display = 'grid';
+      document.getElementById('agent-section').style.display = 'block';
+      document.getElementById('leads-section').style.display = 'block';
+      document.getElementById('last-updated').textContent =
+        'Updated: ' + new Date(data.generatedAt).toLocaleString('en-IN');
+
+    } catch (err) {
+      document.getElementById('loading').textContent =
+        '❌ Could not connect to server. Is it running?';
+    }
+  }
+
+  function renderMetrics(t) {
+    document.getElementById('metrics').innerHTML = `
+      <div class="metric-card blue">
+        <div class="label">Total Leads</div>
+        <div class="value">${t.total}</div>
+        <div class="sub">in selected period</div>
+      </div>
+      <div class="metric-card amber">
+        <div class="label">Pending</div>
+        <div class="value">${t.pending}</div>
+        <div class="sub">awaiting contact</div>
+      </div>
+      <div class="metric-card green">
+        <div class="label">Converted</div>
+        <div class="value">${t.converted}</div>
+        <div class="sub">${t.conversionRate}% rate</div>
+      </div>
+      <div class="metric-card">
+        <div class="label">Contacted</div>
+        <div class="value">${t.contacted}</div>
+        <div class="sub">in progress</div>
+      </div>
+      <div class="metric-card">
+        <div class="label">Lost</div>
+        <div class="value">${t.lost}</div>
+        <div class="sub">marked lost</div>
+      </div>
+      <div class="metric-card ${t.escalated > 0 ? 'red' : ''}">
+        <div class="label">SLA Breaches</div>
+        <div class="value">${t.escalated}</div>
+        <div class="sub">30-min SLA missed</div>
+      </div>
+    `;
+  }
+
+  function renderAgents(agents) {
+    document.getElementById('agent-table').innerHTML = agents.map(a => `
+      <tr>
+        <td>${a.name}</td>
+        <td><span class="badge ${a.active ? 'active' : 'on-leave'}">${a.active ? 'Active' : 'On leave'}</span></td>
+        <td>${a.assigned}</td>
+        <td>${a.contacted}</td>
+        <td>${a.converted}</td>
+        <td>${a.pending}</td>
+        <td>${a.conversionRate}%</td>
+        <td>${a.avgResponseMin !== null ? a.avgResponseMin + ' min' : '—'}</td>
+      </tr>
+    `).join('');
+  }
+
+  function renderLeads(leads) {
+    document.getElementById('leads-table').innerHTML = leads.map(l => `
+      <tr>
+        <td>${l.name}</td>
+        <td>${l.phone || '—'}</td>
+        <td>${l.assignedTo}</td>
+        <td><span class="badge ${l.status}">${l.status}</span></td>
+        <td>${l.escalated ? '<span class="badge breach">⚠ Breached</span>' : '—'}</td>
+        <td>${new Date(l.createdAt).toLocaleString('en-IN')}</td>
+        <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+          ${l.notes || '—'}
+        </td>
+      </tr>
+    `).join('');
+  }
+
+  // Load on page open
+  loadDashboard();
+
+  // Auto-refresh every 30 seconds
+  setInterval(loadDashboard, 30000);
+</script>
+
+</body>
+</html>
